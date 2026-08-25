@@ -7,3 +7,5 @@ Release/
 *.bin
 *.map
 *.launch
+.DS_Store
+.settings/
