@@ -20,6 +20,17 @@ void Task_Heartbeat(void *pvParameters)
 
     uint16_t count = 0;
 
+#if HEARTBEAT_LED_TEST
+    /* 3단계 임시: 부팅 직후 LED 6개를 순차 점등해 배선을 확인한다.
+     * 스케줄러가 이미 돌고 있으므로 vTaskDelay가 정상 동작한다. */
+    LED_SelfTest();
+
+    RiskLevel  test_risk = RISK_SAFE;
+    SystemMode test_mode = MODE_NORMAL;
+    LED_SetRisk(test_risk);
+    LED_SetMode(test_mode);
+#endif
+
     /* vTaskDelayUntil 기준 시각.
      * vTaskDelay는 "깨어난 뒤 N ms"라 루프 본문 실행시간만큼 주기가 밀리지만,
      * vTaskDelayUntil은 절대 시각 기준이라 드리프트가 누적되지 않는다.
@@ -51,6 +62,27 @@ void Task_Heartbeat(void *pvParameters)
             TIM2_SetDuty(50);
             vTaskDelay(pdMS_TO_TICKS(HEARTBEAT_BEEP_MS));
             TIM2_SetDuty(0);
+        }
+#endif
+
+#if HEARTBEAT_LED_TEST
+        /* 3단계 임시: 5초마다 위험도 LED를 한 칸씩 돌리고, 한 바퀴 돌면 모드를 바꾼다.
+         * LED_SetRisk / LED_SetMode 두 API가 실제로 동작하는지 눈으로 확인하는 용도. */
+        if ((count % HEARTBEAT_BEEP_EVERY_N) == 0U) {
+            if (test_risk == RISK_DANGER) {
+                test_risk = RISK_SAFE;
+                test_mode = (test_mode == MODE_NORMAL) ? MODE_SLEEP : MODE_NORMAL;
+                LED_SetMode(test_mode);
+                UART_SendString("[HB] mode -> ");
+                UART_SendNumber((uint16_t)test_mode);
+                UART_SendString("\r\n");
+            } else {
+                test_risk = (RiskLevel)((int)test_risk + 1);
+            }
+            LED_SetRisk(test_risk);
+            UART_SendString("[HB] risk -> ");
+            UART_SendNumber((uint16_t)test_risk);
+            UART_SendString("\r\n");
         }
 #endif
 

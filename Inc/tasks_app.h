@@ -11,6 +11,7 @@
 #include <stdint.h>
 #include "FreeRTOS.h"
 #include "task.h"
+#include "config.h"
 
 /* ===== main.c: 실기 검증 완료된 저수준 드라이버 (CLAUDE.md 2.1) =====
  * 시그니처를 변경하지 말 것. UART_SendString이 const char*가 아닌 것도 원본 그대로 유지. */
@@ -27,6 +28,13 @@ void     UART_SendNumber(uint16_t num);
 void TIM2_PWM_Init(void);
 void TIM2_SetFrequency(uint16_t freq_hz);
 void TIM2_SetDuty(uint8_t duty_percent);
+
+/* ===== led.c: 위험도 LED(GPIOB) + 모드 RGB LED(GPIOC) ===== */
+void LED_Init(void);
+void LED_SetRisk(RiskLevel risk);      /* 초록/노랑/빨강 배타적 점등 */
+void LED_SetMode(SystemMode mode);     /* RGB: 일반=초록, 취침=파랑 */
+void LED_AllOff(void);
+void LED_SelfTest(void);               /* FR12 자가진단 시퀀스 (스케줄러 실행 중에만 호출) */
 
 /* ===== 애플리케이션 태스크 ===== */
 void Task_Heartbeat(void *pvParameters);
@@ -51,11 +59,30 @@ void Task_Heartbeat(void *pvParameters);
 /* ===== 보드 내장 LED ===== */
 #define LD2_PIN                     ( 5U )      /* PA5 (NUCLEO-L476RG User LED) */
 
+/* ===== 외부 LED 핀 (CLAUDE.md 1.2 핀맵) =====
+ * 위험도 LED: GPIOB, 애노드 구동 (GPIO High = 점등)
+ * 모드 RGB : GPIOC, 공통음극  (GPIO High = 점등) */
+#define LED_GREEN_PIN               ( 0U )      /* PB0 = 아두이노 A3 */
+#define LED_YELLOW_PIN              ( 1U )      /* PB1 = 모포 헤더 */
+#define LED_RED_PIN                 ( 2U )      /* PB2 = 모포 헤더 */
+#define LED_RISK_MASK               ( (1U << LED_GREEN_PIN) | (1U << LED_YELLOW_PIN) | (1U << LED_RED_PIN) )
+
+#define RGB_R_PIN                   ( 0U )      /* PC0 = 아두이노 A5 */
+#define RGB_G_PIN                   ( 1U )      /* PC1 = 아두이노 A4 */
+#define RGB_B_PIN                   ( 2U )      /* PC2 = 모포 헤더 */
+#define RGB_MASK                    ( (1U << RGB_R_PIN) | (1U << RGB_G_PIN) | (1U << RGB_B_PIN) )
+
+#define LED_SELFTEST_STEP_MS        ( 300 )     /* 자가진단 각 단계 점등 시간 */
+
 /* ===== 2단계 임시 검증용 =====
  * Task_Heartbeat가 주기적으로 짧게 삑 소리를 내 부저 회로를 확인한다.
  * 3단계 이후 Task_Output이 부저를 넘겨받으면 0으로 바꿔 끌 것. */
 #define HEARTBEAT_BEEP_TEST         ( 1 )
 #define HEARTBEAT_BEEP_EVERY_N      ( 10 )      /* 10 * 500ms = 5초마다 */
 #define HEARTBEAT_BEEP_MS           ( 80 )
+
+/* 3단계 임시 검증용: 부팅 시 LED 순차 점등 + 5초마다 위험도/모드 순환.
+ * 5단계에서 Task_Output이 LED를 넘겨받으면 0으로 바꿔 끌 것. */
+#define HEARTBEAT_LED_TEST          ( 1 )
 
 #endif /* TASKS_APP_H */

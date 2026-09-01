@@ -108,6 +108,10 @@ int main(void) {
     TIM2_PWM_Init();
     UART_SendString("[BOOT] tim2 pwm ok\r\n");
 
+    /* 위험도 LED(PB0-2) + 모드 RGB(PC0-2). 전부 소등 상태로 시작. */
+    LED_Init();
+    UART_SendString("[BOOT] led ok\r\n");
+
     UART_SendString("[BOOT] FreeRTOS ");
     UART_SendString(tskKERNEL_VERSION_NUMBER);
     UART_SendString("\r\n");
