@@ -1,0 +1,46 @@
+/*-----------------------------------------------------------
+ * Task_Heartbeat — 시스템 생존 신호 (CLAUDE.md 7장 1단계)
+ *
+ * 1단계 목표는 "커널이 링크되고 스케줄러가 실제로 돈다"를 증명하는 것.
+ * LED 점멸만으로는 for 루프 딜레이와 구분되지 않으므로 UART 카운터를 함께 출력한다.
+ * vTaskDelay가 정확한 주기로 깨어난다는 것 = SysTick + 커널 tick이 살아있다는 뜻이다.
+ *
+ * 1단계 임시 코드가 아니라 이후에도 heartbeat 용도로 계속 유지한다.
+ *-----------------------------------------------------------*/
+
+#include "stm32l476xx.h"
+#include "FreeRTOS.h"
+#include "task.h"
+#include "tasks_app.h"
+
+void Task_Heartbeat(void *pvParameters)
+{
+    (void)pvParameters;
+
+    uint16_t count = 0;
+
+    /* vTaskDelayUntil 기준 시각.
+     * vTaskDelay는 "깨어난 뒤 N ms"라 루프 본문 실행시간만큼 주기가 밀리지만,
+     * vTaskDelayUntil은 절대 시각 기준이라 드리프트가 누적되지 않는다.
+     * 주기 정확도가 검증 포인트이므로 여기서는 후자를 쓴다. */
+    TickType_t last_wake = xTaskGetTickCount();
+
+    for (;;) {
+        /* PA5 토글.
+         * ODR을 |= / &= 로 직접 건드리면 read-modify-write라 인터럽트와 경합할 수 있다.
+         * 쓰기는 원자적인 BSRR(set) / BRR(reset)로 하고, 현재 상태 판단만 ODR을 읽는다.
+         * (RM0351 8.5.5 BSRR / 8.5.6 BRR) */
+        if (GPIOA->ODR & (1U << LD2_PIN)) {
+            GPIOA->BRR  = (1U << LD2_PIN);   /* 소등 */
+        } else {
+            GPIOA->BSRR = (1U << LD2_PIN);   /* 점등 */
+        }
+
+        /* 스케줄러 동작의 실제 증거. 1초에 2씩(500ms 주기) 증가해야 정상. */
+        UART_SendString("[HB] ");
+        UART_SendNumber(count++);            /* uint16_t라 65535에서 wrap. 무해. */
+        UART_SendString("\r\n");
+
+        vTaskDelayUntil(&last_wake, pdMS_TO_TICKS(HEARTBEAT_PERIOD_MS));
+    }
+}
