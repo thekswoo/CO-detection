@@ -22,6 +22,12 @@
 #define BUZZER_FREQ_NORMAL_HZ    2000   // 일반모드 경보음
 #define BUZZER_FREQ_SLEEP_HZ     2731   // 취침모드: GEC09D 공진주파수 부근 = 최대 음압
 #define BUZZER_FREQ_SELFTEST_HZ  2000   // 자가진단 / 부팅 확인음
+#define BUZZER_ACK_MS              60   // 버튼 입력 확인음 길이
+
+/* ===== 버튼 ===== */
+/* 상태 변화 후 이 시간 동안의 추가 엣지는 채터링으로 보고 버린다.
+ * 접점 바운스는 보통 1~10ms라 50ms면 충분히 덮는다. */
+#define BUTTON_DEBOUNCE_MS         50
 
 /* ===== 시스템 모드 ===== */
 typedef enum {

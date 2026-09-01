@@ -36,8 +36,12 @@ void LED_SetMode(SystemMode mode);     /* RGB: 일반=초록, 취침=파랑 */
 void LED_AllOff(void);
 void LED_SelfTest(void);               /* FR12 자가진단 시퀀스 (스케줄러 실행 중에만 호출) */
 
+/* ===== button.c: EXTI 버튼 입력 ===== */
+void Button_Init(void);
+
 /* ===== 애플리케이션 태스크 ===== */
 void Task_Heartbeat(void *pvParameters);
+void Task_Mode(void *pvParameters);
 
 /* 이후 단계에서 순차적으로 추가한다 (CLAUDE.md 7장).
  * 현재 Src/Task_Sensor.c / Task_Judge.c / Task_Output.c / Task_Mode.c 는
@@ -74,15 +78,44 @@ void Task_Heartbeat(void *pvParameters);
 
 #define LED_SELFTEST_STEP_MS        ( 300 )     /* 자가진단 각 단계 점등 시간 */
 
+/* ===== 버튼 입력 (CLAUDE.md 1.2 핀맵) =====
+ * 전부 active-low + 내부 풀업. EXTI 라인 번호가 서로 달라야 충돌하지 않는다.
+ *   PB5  = 아두이노 D4  -> EXTI5   ┐ 둘 다 EXTI9_5_IRQn
+ *   PC7  = 아두이노 D9  -> EXTI7   ┘
+ *   PC13 = 보드 내장 B1 -> EXTI13    EXTI15_10_IRQn
+ * 비상 리셋은 보드 내장 RESET 버튼(하드웨어)이 담당하므로 GPIO를 쓰지 않는다. */
+#define BTN_MODE_PIN                ( 5U )      /* PB5,  모드 토글 */
+#define BTN_MUTE_PIN                ( 7U )      /* PC7,  경보 음소거 */
+#define BTN_SELFTEST_PIN            ( 13U )     /* PC13, 자가진단 (B1) */
+
+/* 큐로 주고받는 버튼 이벤트 ID */
+typedef enum {
+    BTN_EVT_MODE     = 0,
+    BTN_EVT_MUTE     = 1,
+    BTN_EVT_SELFTEST = 2
+} ButtonEvent;
+
+#define BUTTON_QUEUE_LEN            ( 8 )
+
+#define MODE_TASK_STACK             ( configMINIMAL_STACK_SIZE * 2 )  /* SelfTest 호출로 스택 여유 필요 */
+#define MODE_TASK_PRIORITY          ( 2 )       /* Heartbeat(1)보다 높고 Sensor/Judge(3)보다 낮음 */
+
 /* ===== 2단계 임시 검증용 =====
  * Task_Heartbeat가 주기적으로 짧게 삑 소리를 내 부저 회로를 확인한다.
  * 3단계 이후 Task_Output이 부저를 넘겨받으면 0으로 바꿔 끌 것. */
-#define HEARTBEAT_BEEP_TEST         ( 1 )
+/* 2단계 검증 완료. 4단계부터는 버튼 확인음과 겹쳐 헷갈리므로 끈다. */
+#define HEARTBEAT_BEEP_TEST         ( 0 )
+
+/* 진단용: heartbeat 줄에 버튼 핀의 raw 입력값(D4/D9/B1)을 같이 찍는다.
+ * 내부 풀업이라 안 누름=1, 누름=0 이어야 정상.
+ * 버튼이 안 먹을 때 "배선 문제"와 "EXTI 설정 문제"를 구분하는 용도로 1로 켤 것.
+ * (4단계에서 실제로 이걸로 버튼 상시단락을 잡았다) */
+#define HEARTBEAT_PIN_DEBUG         ( 0 )
 #define HEARTBEAT_BEEP_EVERY_N      ( 10 )      /* 10 * 500ms = 5초마다 */
 #define HEARTBEAT_BEEP_MS           ( 80 )
 
-/* 3단계 임시 검증용: 부팅 시 LED 순차 점등 + 5초마다 위험도/모드 순환.
- * 5단계에서 Task_Output이 LED를 넘겨받으면 0으로 바꿔 끌 것. */
-#define HEARTBEAT_LED_TEST          ( 1 )
+/* 3단계 임시 검증용이었던 LED 순환 테스트.
+ * 4단계부터 버튼(Task_Mode)이 LED를 제어하므로 끈다. */
+#define HEARTBEAT_LED_TEST          ( 0 )
 
 #endif /* TASKS_APP_H */

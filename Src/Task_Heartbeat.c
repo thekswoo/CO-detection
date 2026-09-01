@@ -51,6 +51,18 @@ void Task_Heartbeat(void *pvParameters)
         /* 스케줄러 동작의 실제 증거. 1초에 2씩(500ms 주기) 증가해야 정상. */
         UART_SendString("[HB] ");
         UART_SendNumber(count);              /* uint16_t라 65535에서 wrap. 무해. */
+
+#if HEARTBEAT_PIN_DEBUG
+        /* 버튼 핀 raw 입력. EXTI를 거치지 않고 IDR을 직접 읽으므로
+         * 배선 문제(값이 안 변함)와 EXTI 설정 문제(값은 변하는데 인터럽트가 안 옴)를 구분할 수 있다. */
+        UART_SendString("  D4=");
+        UART_SendChar((GPIOB->IDR & (1U << BTN_MODE_PIN))     ? '1' : '0');
+        UART_SendString(" D9=");
+        UART_SendChar((GPIOC->IDR & (1U << BTN_MUTE_PIN))     ? '1' : '0');
+        UART_SendString(" B1=");
+        UART_SendChar((GPIOC->IDR & (1U << BTN_SELFTEST_PIN)) ? '1' : '0');
+#endif
+
         UART_SendString("\r\n");
 
 #if HEARTBEAT_BEEP_TEST

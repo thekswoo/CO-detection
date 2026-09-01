@@ -1,7 +1,11 @@
 #include "stm32l476xx.h"
 #include "FreeRTOS.h"
 #include "task.h"
+#include "queue.h"
 #include "tasks_app.h"
+
+/* ISR(button.c) -> Task_Mode 버튼 이벤트 큐. 정의는 여기, 참조는 extern으로. */
+QueueHandle_t xQueueButton = NULL;
 
 void GPIO_Init(void) {
     RCC->AHB2ENR |= RCC_AHB2ENR_GPIOAEN;
@@ -116,10 +120,28 @@ int main(void) {
     UART_SendString(tskKERNEL_VERSION_NUMBER);
     UART_SendString("\r\n");
 
+    /* 큐를 EXTI 활성화보다 먼저 만든다.
+     * 순서가 반대면 첫 인터럽트가 NULL 큐에 xQueueSendFromISR을 걸어 죽는다. */
+    xQueueButton = xQueueCreate(BUTTON_QUEUE_LEN, sizeof(ButtonEvent));
+    if (xQueueButton == NULL) {
+        UART_SendString("[FATAL] xQueueCreate(button) failed\r\n");
+        for (;;);
+    }
+
+    Button_Init();
+    UART_SendString("[BOOT] button ok\r\n");
+
     if (xTaskCreate(Task_Heartbeat, "HB",
                     HEARTBEAT_TASK_STACK, NULL,
                     HEARTBEAT_TASK_PRIORITY, NULL) != pdPASS) {
         UART_SendString("[FATAL] xTaskCreate(HB) failed\r\n");
+        for (;;);
+    }
+
+    if (xTaskCreate(Task_Mode, "MODE",
+                    MODE_TASK_STACK, NULL,
+                    MODE_TASK_PRIORITY, NULL) != pdPASS) {
+        UART_SendString("[FATAL] xTaskCreate(MODE) failed\r\n");
         for (;;);
     }
 
