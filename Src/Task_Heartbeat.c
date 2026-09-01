@@ -11,6 +11,7 @@
 #include "stm32l476xx.h"
 #include "FreeRTOS.h"
 #include "task.h"
+#include "config.h"
 #include "tasks_app.h"
 
 void Task_Heartbeat(void *pvParameters)
@@ -38,8 +39,22 @@ void Task_Heartbeat(void *pvParameters)
 
         /* 스케줄러 동작의 실제 증거. 1초에 2씩(500ms 주기) 증가해야 정상. */
         UART_SendString("[HB] ");
-        UART_SendNumber(count++);            /* uint16_t라 65535에서 wrap. 무해. */
+        UART_SendNumber(count);              /* uint16_t라 65535에서 wrap. 무해. */
         UART_SendString("\r\n");
+
+#if HEARTBEAT_BEEP_TEST
+        /* 2단계 임시: N회마다 짧게 삑. 부저 회로 + TIM2 PWM 확인용.
+         * vTaskDelayUntil은 절대 시각 기준이라 이 지연만큼 다음 주기가 밀리지 않고 자동 보정된다. */
+        if ((count % HEARTBEAT_BEEP_EVERY_N) == 0U) {
+            UART_SendString("[HB] beep\r\n");
+            TIM2_SetFrequency(BUZZER_FREQ_SELFTEST_HZ);
+            TIM2_SetDuty(50);
+            vTaskDelay(pdMS_TO_TICKS(HEARTBEAT_BEEP_MS));
+            TIM2_SetDuty(0);
+        }
+#endif
+
+        count++;
 
         vTaskDelayUntil(&last_wake, pdMS_TO_TICKS(HEARTBEAT_PERIOD_MS));
     }

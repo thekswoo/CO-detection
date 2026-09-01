@@ -104,6 +104,10 @@ int main(void) {
     ADC_Init();
     UART_SendString("[BOOT] adc ok\r\n");
 
+    /* 부저 PWM. duty 0(무음)으로 초기화되므로 여기서 소리가 나면 안 된다. */
+    TIM2_PWM_Init();
+    UART_SendString("[BOOT] tim2 pwm ok\r\n");
+
     UART_SendString("[BOOT] FreeRTOS ");
     UART_SendString(tskKERNEL_VERSION_NUMBER);
     UART_SendString("\r\n");

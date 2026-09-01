@@ -22,6 +22,12 @@ void     UART_SendChar(char c);
 void     UART_SendString(char *s);
 void     UART_SendNumber(uint16_t num);
 
+/* ===== tim2_pwm.c: 부저 PWM 드라이버 (TIM2_CH2 / PA1) =====
+ * 시그니처는 Src/Task_Output.c가 이미 extern으로 선언해 둔 것과 일치시켜야 한다. */
+void TIM2_PWM_Init(void);
+void TIM2_SetFrequency(uint16_t freq_hz);
+void TIM2_SetDuty(uint8_t duty_percent);
+
 /* ===== 애플리케이션 태스크 ===== */
 void Task_Heartbeat(void *pvParameters);
 
@@ -44,5 +50,12 @@ void Task_Heartbeat(void *pvParameters);
 
 /* ===== 보드 내장 LED ===== */
 #define LD2_PIN                     ( 5U )      /* PA5 (NUCLEO-L476RG User LED) */
+
+/* ===== 2단계 임시 검증용 =====
+ * Task_Heartbeat가 주기적으로 짧게 삑 소리를 내 부저 회로를 확인한다.
+ * 3단계 이후 Task_Output이 부저를 넘겨받으면 0으로 바꿔 끌 것. */
+#define HEARTBEAT_BEEP_TEST         ( 1 )
+#define HEARTBEAT_BEEP_EVERY_N      ( 10 )      /* 10 * 500ms = 5초마다 */
+#define HEARTBEAT_BEEP_MS           ( 80 )
 
 #endif /* TASKS_APP_H */

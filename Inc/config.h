@@ -12,6 +12,17 @@
 
 #define MOVING_AVG_WINDOW          4    // 이동평균 샘플 개수
 
+/* ===== 부저 PWM (TIM2_CH2 / PA1) ===== */
+/* TIM2 입력 클럭 = APB1 타이머 클럭. 현재 SYSCLK = MSI 4MHz, APB1 prescaler = 1 이므로 4MHz.
+ * ★ 클럭을 올리면 이 값도 반드시 수정할 것 (CLAUDE.md 1.1: FreeRTOSConfig, USART BRR와 함께) */
+#define TIM2_CLK_HZ            4000000UL
+/* PWM 내부 카운터 틱. PSC로 TIM2_CLK_HZ를 이 값까지 분주한다.
+ * 1MHz면 주파수 = 1e6/(ARR+1), 2~5kHz 대역에서 duty 분해능 200~500스텝으로 충분. */
+#define BUZZER_TICK_HZ        1000000UL
+#define BUZZER_FREQ_NORMAL_HZ    2000   // 일반모드 경보음
+#define BUZZER_FREQ_SLEEP_HZ     2731   // 취침모드: GEC09D 공진주파수 부근 = 최대 음압
+#define BUZZER_FREQ_SELFTEST_HZ  2000   // 자가진단 / 부팅 확인음
+
 /* ===== 시스템 모드 ===== */
 typedef enum {
     MODE_NORMAL = 0,
