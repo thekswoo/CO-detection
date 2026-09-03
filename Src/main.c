@@ -2,10 +2,15 @@
 #include "FreeRTOS.h"
 #include "task.h"
 #include "queue.h"
+#include "queue_defs.h"
 #include "tasks_app.h"
 
-/* ISR(button.c) -> Task_Mode 버튼 이벤트 큐. 정의는 여기, 참조는 extern으로. */
-QueueHandle_t xQueueButton = NULL;
+/* 태스크 간 통신 큐. 정의는 여기, 참조는 각 태스크에서 extern으로 (FR10).
+ *   ISR --xQueueButton--> Task_Mode
+ *   Task_Sensor --xQueueSensorToJudge--> Task_Judge --xQueueJudgeToOutput--> Task_Output */
+QueueHandle_t xQueueButton        = NULL;
+QueueHandle_t xQueueSensorToJudge = NULL;
+QueueHandle_t xQueueJudgeToOutput = NULL;
 
 void GPIO_Init(void) {
     RCC->AHB2ENR |= RCC_AHB2ENR_GPIOAEN;
@@ -55,6 +60,24 @@ void ADC_Init(void) {
     // 채널 5 (PA0), 샘플링 타임 설정
     ADC1->SQR1 = (5 << ADC_SQR1_SQ1_Pos); // 시퀀스 1번에 채널5
     ADC1->SMPR1 |= (7 << ADC_SMPR1_SMP5_Pos); // 최대 샘플링타임(느리지만 안정적)
+
+    /* 하드웨어 오버샘플링 (RM0351 18.4.14)
+     *
+     * ADSTART를 한 번 세우면 ADC가 스스로 ADC_OVERSAMPLE_N회 연속 변환해
+     * 누적한 뒤 우시프트해서 DR에 결과 하나만 남긴다. CPU 개입이 없고
+     * ADC_Read()는 그대로 두면 된다.
+     *
+     * 랜덤 노이즈가 1/sqrt(N)로 줄어든다. 다만 전원 레일 처짐이나 센서
+     * 드리프트처럼 모든 샘플에 동일하게 실리는 성분은 못 걸러낸다.
+     *
+     * 시프트를 누적 횟수와 맞췄으므로 결과는 여전히 0~4095다.
+     * -> CO_THRESHOLD_* 값을 재조정할 필요가 없다.
+     *
+     * CFGR2의 이 비트들은 ADSTART=0 일 때만 쓸 수 있다. 여기는 변환 시작 전이라 안전. */
+    ADC1->CFGR2 &= ~(ADC_CFGR2_ROVSE | ADC_CFGR2_OVSR | ADC_CFGR2_OVSS | ADC_CFGR2_TROVS);
+    ADC1->CFGR2 |= (ADC_OVERSAMPLE_RATIO_CODE << ADC_CFGR2_OVSR_Pos)
+                 | (ADC_OVERSAMPLE_SHIFT      << ADC_CFGR2_OVSS_Pos)
+                 |  ADC_CFGR2_ROVSE;
 }
 
 uint16_t ADC_Read(void) {
@@ -122,9 +145,12 @@ int main(void) {
 
     /* 큐를 EXTI 활성화보다 먼저 만든다.
      * 순서가 반대면 첫 인터럽트가 NULL 큐에 xQueueSendFromISR을 걸어 죽는다. */
-    xQueueButton = xQueueCreate(BUTTON_QUEUE_LEN, sizeof(ButtonEvent));
-    if (xQueueButton == NULL) {
-        UART_SendString("[FATAL] xQueueCreate(button) failed\r\n");
+    xQueueButton        = xQueueCreate(BUTTON_QUEUE_LEN, sizeof(ButtonEvent));
+    xQueueSensorToJudge = xQueueCreate(SENSOR_QUEUE_LEN, sizeof(SensorData_t));
+    xQueueJudgeToOutput = xQueueCreate(JUDGE_QUEUE_LEN,  sizeof(JudgeResult_t));
+
+    if (xQueueButton == NULL || xQueueSensorToJudge == NULL || xQueueJudgeToOutput == NULL) {
+        UART_SendString("[FATAL] xQueueCreate failed (heap)\r\n");
         for (;;);
     }
 
@@ -142,6 +168,20 @@ int main(void) {
                     MODE_TASK_STACK, NULL,
                     MODE_TASK_PRIORITY, NULL) != pdPASS) {
         UART_SendString("[FATAL] xTaskCreate(MODE) failed\r\n");
+        for (;;);
+    }
+
+    /* 센서 파이프라인: Sensor -> Judge -> Output */
+    if (xTaskCreate(Task_Sensor, "SENS",
+                    SENSOR_TASK_STACK, NULL,
+                    SENSOR_TASK_PRIORITY, NULL) != pdPASS ||
+        xTaskCreate(Task_Judge, "JUDG",
+                    JUDGE_TASK_STACK, NULL,
+                    JUDGE_TASK_PRIORITY, NULL) != pdPASS ||
+        xTaskCreate(Task_Output, "OUT",
+                    OUTPUT_TASK_STACK, NULL,
+                    OUTPUT_TASK_PRIORITY, NULL) != pdPASS) {
+        UART_SendString("[FATAL] xTaskCreate(pipeline) failed\r\n");
         for (;;);
     }
 

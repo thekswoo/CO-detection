@@ -14,6 +14,13 @@
 #include "config.h"
 #include "tasks_app.h"
 
+/* 로그를 찍을 주기인지 판정. 진단 모드에서는 매 주기 찍는다. */
+#if HEARTBEAT_PIN_DEBUG
+  #define HB_SHOULD_LOG(c)   (1)
+#else
+  #define HB_SHOULD_LOG(c)   ((((c) % HEARTBEAT_LOG_EVERY_N)) == 0U)
+#endif
+
 void Task_Heartbeat(void *pvParameters)
 {
     (void)pvParameters;
@@ -48,22 +55,25 @@ void Task_Heartbeat(void *pvParameters)
             GPIOA->BSRR = (1U << LD2_PIN);   /* 점등 */
         }
 
-        /* 스케줄러 동작의 실제 증거. 1초에 2씩(500ms 주기) 증가해야 정상. */
-        UART_SendString("[HB] ");
-        UART_SendNumber(count);              /* uint16_t라 65535에서 wrap. 무해. */
+        /* 스케줄러 동작의 실제 증거. LED는 매 주기 토글하되 로그는 솎아낸다.
+         * 진단 모드에서는 버튼 상태 변화를 놓치면 안 되므로 매 주기 출력한다. */
+        if (HB_SHOULD_LOG(count)) {
+            UART_SendString("[HB] ");
+            UART_SendNumber(count);          /* uint16_t라 65535에서 wrap. 무해. */
 
 #if HEARTBEAT_PIN_DEBUG
-        /* 버튼 핀 raw 입력. EXTI를 거치지 않고 IDR을 직접 읽으므로
-         * 배선 문제(값이 안 변함)와 EXTI 설정 문제(값은 변하는데 인터럽트가 안 옴)를 구분할 수 있다. */
-        UART_SendString("  D4=");
-        UART_SendChar((GPIOB->IDR & (1U << BTN_MODE_PIN))     ? '1' : '0');
-        UART_SendString(" D9=");
-        UART_SendChar((GPIOC->IDR & (1U << BTN_MUTE_PIN))     ? '1' : '0');
-        UART_SendString(" B1=");
-        UART_SendChar((GPIOC->IDR & (1U << BTN_SELFTEST_PIN)) ? '1' : '0');
+            /* 버튼 핀 raw 입력. EXTI를 거치지 않고 IDR을 직접 읽으므로
+             * 배선 문제(값이 안 변함)와 EXTI 설정 문제(값은 변하는데 인터럽트가 안 옴)를 구분할 수 있다. */
+            UART_SendString("  D4=");
+            UART_SendChar((GPIOB->IDR & (1U << BTN_MODE_PIN))     ? '1' : '0');
+            UART_SendString(" D9=");
+            UART_SendChar((GPIOC->IDR & (1U << BTN_MUTE_PIN))     ? '1' : '0');
+            UART_SendString(" B1=");
+            UART_SendChar((GPIOC->IDR & (1U << BTN_SELFTEST_PIN)) ? '1' : '0');
 #endif
 
-        UART_SendString("\r\n");
+            UART_SendString("\r\n");
+        }
 
 #if HEARTBEAT_BEEP_TEST
         /* 2단계 임시: N회마다 짧게 삑. 부저 회로 + TIM2 PWM 확인용.

@@ -101,7 +101,7 @@ PA1 (TIM2_CH2 PWM) ──[330Ω]── B
 아래 함수들은 **실기 검증이 끝났다. 동작 로직을 변경하지 말 것.** 리팩터링 시 시그니처와 레지스터 시퀀스를 그대로 유지한다.
 
 - `GPIO_Init()` — PA0 아날로그, PA2/PA3 AF7
-- `ADC_Init()` — DEEPPWD 해제 → CCR CKMODE → ADVREGEN → 안정화 대기 → 캘리브레이션 → ADEN → ADRDY 대기 → SQR1(채널5) → SMPR1
+- `ADC_Init()` — DEEPPWD 해제 → CCR CKMODE → ADVREGEN → 안정화 대기 → 캘리브레이션 → ADEN → ADRDY 대기 → SQR1(채널5) → SMPR1 → **CFGR2 오버샘플링**
 - `ADC_Read()` — ADSTART → EOC 폴링 → DR 반환
 - `USART2_Init()`, `UART_SendChar()`, `UART_SendString()`, `UART_SendNumber()`
 
@@ -112,6 +112,26 @@ PA1 (TIM2_CH2 PWM) ──[330Ω]── B
 | 3.3V 직결 | 4091~4093 |
 | 대기 중 MQ-7 (예열 후) | 61~73 |
 | 알코올 솜 반응 피크 | 608 |
+
+> 위 데이터는 오버샘플링 도입 **이전** 값이다. 출력 스케일(0~4095)은 오버샘플링 후에도
+> 동일하므로 절대값은 그대로 비교 가능하고, 변동 폭만 줄어든다.
+
+**ADC 오버샘플링 (5단계에서 추가)**
+
+MQ-7 값이 들쭉날쭉해 `ADC_CFGR2`의 `ROVSE`/`OVSR`/`OVSS`로 16회 누적 + 4비트 우시프트를 켰다.
+`ADC_Read()`는 변경되지 않았고 출력도 0~4095로 유지된다.
+파라미터는 `config.h`의 `ADC_OVERSAMPLE_RATIO_CODE` / `ADC_OVERSAMPLE_SHIFT`.
+
+노이즈 원인별로 대응 수단이 다르다는 점에 유의:
+
+| 원인 | 오버샘플링 | 대응 |
+|---|---|---|
+| 변환 자체의 랜덤 노이즈 | 걸러짐 | 오버샘플링 |
+| 히터 150mA로 인한 5V 레일 처짐 | **못 걸러냄** | VCC-GND 100nF, ADC 분압점 100nF |
+| MQ-7 예열 중 저항 드리프트 | **못 걸러냄** | 24~48h 예열 |
+| 공기 흐름/습도로 인한 저주파 이동 | **못 걸러냄** | `SIGNAL_TAU_S` 확대 |
+
+오버샘플링은 매 샘플에 동일하게 실리는 성분(레일 처짐 등)에는 무력하다.
 
 ### 2.2 반드시 알아야 할 실리콘 함정
 
@@ -201,13 +221,24 @@ typedef enum { RISK_SAFE = 0, RISK_WARN = 1, RISK_DANGER = 2 } RiskLevel;
 
 #define SENSOR_PERIOD_NORMAL_MS   1000
 #define SENSOR_PERIOD_SLEEP_MS     300
-#define CO_THRESHOLD_NORMAL        500
-#define CO_THRESHOLD_SLEEP         350   /* NORMAL의 70% */
-#define MOVING_AVG_WINDOW            4
+/* 판정은 절대 ADC 값이 아니라 delta(적응형 기준선 대비 상승량)로 한다. 4.4 참조.
+ * 값의 근거는 실측 알코올 피크(408 / 1002, 2.5배 편차)이며 낮은 쪽에 맞춰 잡았다. */
+#define CO_DELTA_WARN_NORMAL        40
+#define CO_DELTA_DANGER_NORMAL     150
+#define CO_DELTA_WARN_SLEEP         28   /* NORMAL의 70% (FR5) */
+#define CO_DELTA_DANGER_SLEEP      105
+
+/* 필터는 샘플 개수가 아니라 시간 상수 기준(EMA)이다. 모드 전환으로 주기가
+ * 바뀌어도 시정수가 고정된다. 기준선 추종은 비대칭 — 높게 남으면 경보가 죽는다. */
+#define SIGNAL_TAU_S              4.0f
+#define BASELINE_TAU_S          300.0f   /* 상승 추종 */
+#define BASELINE_TAU_FALL_S      60.0f   /* 하강 추종 (안전 방향이라 빠르게) */
+#define BASELINE_WARMUP_MS      60000UL  /* 이 구간은 baseline = signal 하드 고정 */
+#define BASELINE_FREEZE_DELTA       20   /* WARN보다 낮게 유지할 것 */
 
 /* queue_defs.h */
 typedef struct {
-    uint16_t adc_raw;        /* 이동평균 적용 후 */
+    uint16_t adc_raw;        /* EMA 평활화 후 */
     float    rate_of_rise;   /* MLP 입력용, ADC counts/sec */
     int16_t  temp_c_x10;     /* TMP102, 0.1℃ 단위 */
 } SensorData_t;
@@ -267,12 +298,24 @@ ISR은 큐(`xQueueButton`)로 `ButtonEvent`를 넘기고, 실제 상태 변경·
 
 ### 4.4 위험도 판정 로직
 
+판정 입력은 **절대 ADC 값이 아니라 `delta`(적응형 기준선 대비 상승량)** 다.
+
 ```
-alarm_deterministic (임계값 초과)  → RISK_DANGER  (빨강 + 부저)
-alarm_mlp (조기경보)               → RISK_WARN    (노랑)
-둘 다 아님                         → RISK_SAFE    (초록)
+delta >= DANGER 임계값                 → RISK_DANGER  (빨강 + 부저)
+delta >= WARN 임계값  또는  alarm_mlp  → RISK_WARN    (노랑)
+그 외                                  → RISK_SAFE    (초록)
+baseline_ready == 0 (부팅 후 30초)     → RISK_SAFE 고정 (경보 억제)
 ```
 결정론적 경보가 MLP보다 우선한다. MLP가 오동작해도 임계값 로직은 독립적으로 항상 동작해야 한다.
+
+**왜 절대값이 아니라 delta인가:** MQ-7을 히터 사이클링(5V 60s / 1.4V 90s) 없이 상시 5V로
+구동하고 예열도 충분치 않아, 절대 ADC 값이 매 부팅마다 다른 지점으로 수렴하고 수십 초 단위로
+드리프트한다(실측: 같은 세션 내에서 40 → 366 → 184). 고정 임계값 500은 이 조건에서 성립하지
+않는다. 기준선 대비 상승량으로 보면 센서가 어디에 정착하든 평상시가 0이 되어 판정이 안정된다.
+
+기준선은 `delta < BASELINE_FREEZE_DELTA`일 때만 학습한다. 그렇지 않으면 서서히 올라오는 진짜
+누출이 기준선에 흡수돼 경보가 나지 않는다. 단 신호가 기준선보다 낮아지는 방향은 항상 추종해
+기준선이 높게 고착되는 것을 막는다.
 
 ### 4.5 제외 범위 (Won't)
 

@@ -39,9 +39,18 @@ void LED_SelfTest(void);               /* FR12 자가진단 시퀀스 (스케줄
 /* ===== button.c: EXTI 버튼 입력 ===== */
 void Button_Init(void);
 
+/* ===== tmp102.c: 온도센서 (FR6, 8단계에서 구현) ===== */
+int16_t TMP102_ReadTempX10(void);   /* 0.1도 단위 정수 */
+
+/* ===== mlp.c: 조기경보 추론 (FR7, 9단계에서 구현) ===== */
+float mlp_infer(float co_val, float rate_of_rise);   /* 0.0~1.0 위험 확률 */
+
 /* ===== 애플리케이션 태스크 ===== */
 void Task_Heartbeat(void *pvParameters);
 void Task_Mode(void *pvParameters);
+void Task_Sensor(void *pvParameters);
+void Task_Judge(void *pvParameters);
+void Task_Output(void *pvParameters);
 
 /* 이후 단계에서 순차적으로 추가한다 (CLAUDE.md 7장).
  * 현재 Src/Task_Sensor.c / Task_Judge.c / Task_Output.c / Task_Mode.c 는
@@ -59,6 +68,9 @@ void Task_Mode(void *pvParameters);
 #define HEARTBEAT_TASK_STACK        configMINIMAL_STACK_SIZE
 #define HEARTBEAT_TASK_PRIORITY     ( 1 )       /* 가장 낮음. 이후 추가될 태스크에 항상 양보 */
 #define HEARTBEAT_PERIOD_MS         ( 500 )
+/* LED 점멸은 500ms 그대로 두고 UART 로그만 솎아낸다.
+ * 5단계부터 [CO] 로그가 1초마다 나오므로 [HB]까지 매번 찍으면 읽기 어렵다. */
+#define HEARTBEAT_LOG_EVERY_N       ( 10 )      /* 10 * 500ms = 5초마다 */
 
 /* ===== 보드 내장 LED ===== */
 #define LD2_PIN                     ( 5U )      /* PA5 (NUCLEO-L476RG User LED) */
@@ -99,6 +111,19 @@ typedef enum {
 
 #define MODE_TASK_STACK             ( configMINIMAL_STACK_SIZE * 2 )  /* SelfTest 호출로 스택 여유 필요 */
 #define MODE_TASK_PRIORITY          ( 2 )       /* Heartbeat(1)보다 높고 Sensor/Judge(3)보다 낮음 */
+
+/* ===== 센서 파이프라인 태스크 (CLAUDE.md 3.1) =====
+ * Sensor/Judge를 높게 두는 이유: 감지·판정이 표시보다 항상 우선해야 한다.
+ * 출력이 밀리는 건 괜찮지만 판정이 밀리면 안 된다. */
+#define SENSOR_TASK_STACK           ( configMINIMAL_STACK_SIZE * 2 )
+#define SENSOR_TASK_PRIORITY        ( 3 )
+#define JUDGE_TASK_STACK            ( configMINIMAL_STACK_SIZE * 2 )
+#define JUDGE_TASK_PRIORITY         ( 3 )
+#define OUTPUT_TASK_STACK           ( configMINIMAL_STACK_SIZE * 2 )
+#define OUTPUT_TASK_PRIORITY        ( 2 )
+
+#define SENSOR_QUEUE_LEN            ( 4 )
+#define JUDGE_QUEUE_LEN             ( 4 )
 
 /* ===== 2단계 임시 검증용 =====
  * Task_Heartbeat가 주기적으로 짧게 삑 소리를 내 부저 회로를 확인한다.

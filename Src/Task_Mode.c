@@ -22,6 +22,10 @@
 volatile SystemMode g_mode  = MODE_NORMAL;
 volatile uint8_t    g_muted = 0;
 
+/* 자가진단 시퀀스가 도는 동안 1. Task_Output이 이걸 보고 LED/부저를 건드리지 않는다.
+ * 없으면 1초마다 오는 판정 결과가 순차 점등을 덮어써서 시퀀스가 보이지 않는다. */
+volatile uint8_t    g_selftest_active = 0;
+
 extern QueueHandle_t xQueueButton;
 
 /* 버튼이 먹었다는 촉각 피드백. 짧게 한 번. */
@@ -39,16 +43,19 @@ static void run_selftest(void)
 {
     UART_SendString("[SELFTEST] start\r\n");
 
+    g_selftest_active = 1;                /* Task_Output의 LED 갱신을 잠시 막는다 */
+
     LED_SelfTest();                       /* led.c 재사용 (3단계에서 구현) */
 
     ack_beep(BUZZER_FREQ_NORMAL_HZ);
     vTaskDelay(pdMS_TO_TICKS(80));
     ack_beep(BUZZER_FREQ_SLEEP_HZ);
 
-    /* 상태 복원. 위험도 LED는 5단계에서 Task_Output이 다시 칠하므로
-     * 여기서는 안전측(초록)으로 두고 모드 표시만 정확히 복구한다. */
-    LED_SetRisk(RISK_SAFE);
+    /* 모드 표시를 먼저 복구한 뒤 플래그를 내린다.
+     * 순서가 반대면 그 사이에 들어온 판정 결과와 겹쳐 잠깐 깜빡인다.
+     * 위험도 LED는 다음 판정 결과가 오면 Task_Output이 곧바로 덮어쓴다. */
     LED_SetMode(g_mode);
+    g_selftest_active = 0;
 
     UART_SendString("[SELFTEST] done\r\n");
 }
